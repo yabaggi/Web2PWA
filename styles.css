@@ -1,6 +1,7 @@
 /**
  * PWA Converter - Styles
  * Modern, responsive design with smooth animations
+ * Updated for folder upload functionality
  */
 
 /* ===========================
@@ -246,7 +247,7 @@ body {
 }
 
 /* ===========================
-   File Upload Area
+   File Upload Area (UPDATED)
    =========================== */
 .upload-area {
     display: flex;
@@ -272,6 +273,11 @@ body {
 .file-input-group.required-file {
     border-color: var(--primary-light);
     background: linear-gradient(135deg, rgba(33, 150, 243, 0.03) 0%, rgba(33, 150, 243, 0.08) 100%);
+}
+
+.folder-upload-group {
+    padding: var(--spacing-lg);
+    border-width: 3px;
 }
 
 .file-label {
@@ -353,6 +359,10 @@ body {
     color: var(--error-color);
 }
 
+.file-status.warning {
+    color: var(--warning-color);
+}
+
 .file-info {
     margin-top: var(--spacing-xs);
     padding: var(--spacing-xs);
@@ -372,6 +382,95 @@ body {
     margin-top: var(--spacing-xs);
     color: var(--text-light);
     font-size: 0.875rem;
+}
+
+/* ===========================
+   Folder Contents Preview (NEW)
+   =========================== */
+.folder-contents {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--background);
+    border-radius: var(--border-radius-small);
+    border-left: 4px solid var(--primary-color);
+}
+
+.folder-contents h4 {
+    font-size: 1rem;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+}
+
+.folder-tree {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.8;
+    color: var(--text-secondary);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.folder-tree-item {
+    padding: 0.25rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.folder-tree-item.file {
+    padding-left: 1.5rem;
+}
+
+.folder-tree-item.subfolder {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.folder-tree-item.important {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.folder-tree-icon {
+    flex-shrink: 0;
+}
+
+/* Requirements Box (NEW) */
+.requirements-box {
+    margin-top: var(--spacing-lg);
+    padding: var(--spacing-md);
+    background: var(--warning-light);
+    border-left: 4px solid var(--warning-color);
+    border-radius: var(--border-radius-small);
+}
+
+.requirements-box h4 {
+    font-size: 1rem;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+}
+
+.requirements-box ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.requirements-box li {
+    padding: 0.25rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.requirements-box li::before {
+    content: "•";
+    position: absolute;
+    left: 0.5rem;
+    color: var(--warning-color);
+    font-weight: bold;
+}
+
+.requirements-box strong {
+    color: var(--text-primary);
 }
 
 /* ===========================
@@ -466,6 +565,12 @@ body {
 
 .form-input::placeholder {
     color: var(--text-light);
+}
+
+.form-input:read-only {
+    background: var(--background);
+    cursor: not-allowed;
+    opacity: 0.7;
 }
 
 textarea.form-input {
@@ -666,12 +771,14 @@ textarea.form-input {
     gap: var(--spacing-xl);
     justify-content: center;
     margin-top: var(--spacing-lg);
+    flex-wrap: wrap;
 }
 
 .stat {
     display: flex;
     flex-direction: column;
     align-items: center;
+    min-width: 120px;
 }
 
 .stat-value {
@@ -688,58 +795,40 @@ textarea.form-input {
 }
 
 /* ===========================
-   Download Section
+   Download Section (UPDATED)
    =========================== */
 .download-section-content {
     margin-bottom: var(--spacing-xl);
 }
 
-.download-section-content h3 {
+.download-section-content h3,
+.download-section-content h4 {
     font-size: 1.25rem;
     margin-bottom: var(--spacing-md);
     color: var(--text-primary);
 }
 
-.download-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: var(--spacing-md);
-    margin-bottom: var(--spacing-lg);
-}
-
-.download-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-lg) var(--spacing-md);
-    background: white;
-    border: 2px solid var(--border-color);
+.zip-contents-info {
+    margin: var(--spacing-lg) 0;
+    padding: var(--spacing-md);
+    background: var(--background);
     border-radius: var(--border-radius);
-    cursor: pointer;
-    transition: var(--transition);
-    text-align: center;
 }
 
-.download-btn:hover {
-    border-color: var(--primary-color);
-    box-shadow: var(--shadow-medium);
-    transform: translateY(-4px);
+.zip-contents-info h4 {
+    margin-bottom: var(--spacing-sm);
 }
 
-.download-icon {
-    font-size: 2.5rem;
+.zip-contents-info ul {
+    list-style: none;
+    padding-left: 0;
 }
 
-.download-label {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.download-size {
-    font-size: 0.75rem;
-    color: var(--text-light);
+.zip-contents-info li {
+    padding: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 /* ===========================
@@ -946,6 +1035,18 @@ textarea.form-input {
     transform: translateY(0);
 }
 
+.toast.success {
+    background: var(--success-color);
+}
+
+.toast.error {
+    background: var(--error-color);
+}
+
+.toast.warning {
+    background: var(--warning-color);
+}
+
 /* ===========================
    Footer
    =========================== */
@@ -1023,11 +1124,6 @@ textarea.form-input {
         width: 100%;
     }
 
-    .download-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: var(--spacing-sm);
-    }
-
     .deployment-grid {
         grid-template-columns: 1fr;
     }
@@ -1052,6 +1148,10 @@ textarea.form-input {
         right: var(--spacing-sm);
         bottom: var(--spacing-sm);
     }
+
+    .folder-tree {
+        font-size: 0.75rem;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1066,8 +1166,12 @@ textarea.form-input {
         font-size: 1.25rem;
     }
 
-    .download-grid {
-        grid-template-columns: 1fr;
+    .color-input-wrapper {
+        flex-direction: column;
+    }
+
+    .color-input {
+        width: 100%;
     }
 }
 
@@ -1117,4 +1221,23 @@ textarea.form-input {
     .btn-primary {
         border: 2px solid var(--text-primary);
     }
+}
+
+/* Custom scrollbar for folder tree */
+.folder-tree::-webkit-scrollbar {
+    width: 8px;
+}
+
+.folder-tree::-webkit-scrollbar-track {
+    background: var(--background);
+    border-radius: 4px;
+}
+
+.folder-tree::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.folder-tree::-webkit-scrollbar-thumb:hover {
+    background: var(--text-light);
 }

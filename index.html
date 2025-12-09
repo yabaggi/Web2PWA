@@ -28,50 +28,56 @@
             </div>
             <p class="subtitle">Transform your web app into a Progressive Web App in minutes</p>
             <div class="features-badges">
-                <span class="badge">✓ No Backend Required</span>
+                <span class="badge">✓ Folder Upload</span>
                 <span class="badge">✓ Instant Generation</span>
                 <span class="badge">✓ Production Ready</span>
             </div>
         </header>
 
         <main class="main-content">
-            <!-- Step 1: File Upload Section -->
+            <!-- Step 1: Folder Upload Section -->
             <section id="upload-section" class="card active">
                 <div class="card-header">
                     <span class="step-number">1</span>
-                    <h2>Upload Your Files</h2>
+                    <h2>Upload Your App Folder</h2>
                 </div>
                 
                 <div class="card-body">
                     <p class="section-description">
-                        Select the folder containing your web application files. 
-                        The folder should contain an HTML file, and optionally CSS and JavaScript files.
+                        Select the folder containing your web application. The folder must include an 
+                        <strong>index.html</strong> file in the root. All files and subfolders will be included in your PWA.
                     </p>
 
                     <div class="upload-area">
-                        <!-- App Folder -->
-                        <div class="file-input-group required-file">
-                            <label for="app-folder" class="file-label">
+                        <!-- Folder Upload -->
+                        <div class="file-input-group required-file folder-upload-group">
+                            <label for="folder-input" class="file-label">
                                 <span class="file-icon">📁</span>
                                 <span class="file-label-text">
-                                    <strong>App Folder</strong>
+                                    <strong>Select App Folder</strong>
                                     <span class="required-badge">Required</span>
                                 </span>
                             </label>
                             <input 
                                 type="file" 
-                                id="app-folder" 
-                                webkitdirectory
-                                directory
+                                id="folder-input" 
+                                webkitdirectory 
+                                directory 
                                 multiple
                                 required
                                 class="file-input"
                             >
                             <span class="file-status" id="folder-status"></span>
                             <div class="file-info" id="folder-info"></div>
+                            
+                            <!-- Folder Contents Preview -->
+                            <div class="folder-contents" id="folder-contents" style="display: none;">
+                                <h4>📂 Folder Contents:</h4>
+                                <div class="folder-tree" id="folder-tree"></div>
+                            </div>
                         </div>
 
-                        <!-- Icon File -->
+                        <!-- Icon Upload (Separate) -->
                         <div class="file-input-group">
                             <label for="icon-file" class="file-label">
                                 <span class="file-icon">🖼️</span>
@@ -88,16 +94,25 @@
                             >
                             <span class="file-status" id="icon-status"></span>
                             <div class="file-info" id="icon-info"></div>
-                            <small class="help-text">Recommended: 512x512px PNG or SVG</small>
+                            <small class="help-text">Recommended: 512x512px PNG. If not provided, we'll generate one for you.</small>
                         </div>
                     </div>
 
                     <div class="info-box">
                         <span class="info-icon">💡</span>
                         <div class="info-content">
-                            <strong>Pro Tip:</strong> If you don't have an icon, we'll generate a placeholder for you. 
-                            You can always replace it later!
+                            <strong>Pro Tip:</strong> Your folder can contain any files and subfolders (JSON, images, audio, etc.). 
+                            Everything will be included in the final PWA. Just make sure <code>index.html</code> is in the root of your selected folder!
                         </div>
+                    </div>
+
+                    <div class="requirements-box">
+                        <h4>✅ Requirements:</h4>
+                        <ul>
+                            <li><strong>index.html</strong> must be in the root of your folder</li>
+                            <li>Folder size should be under 100MB</li>
+                            <li>All files and subfolders will be preserved</li>
+                        </ul>
                     </div>
                 </div>
 
@@ -240,6 +255,37 @@
                             
                             <div class="form-grid">
                                 <div class="form-group">
+                                    <label for="app-id" class="form-label required">
+                                        App ID
+                                        <span class="help-icon" title="Unique identifier for your app">?</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        id="app-id" 
+                                        class="form-input"
+                                        required 
+                                        placeholder="myapp-id"
+                                    >
+                                    <small class="help-text">Unique identifier (auto-generated from folder name)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="folder-name" class="form-label required">
+                                        Folder Name
+                                        <span class="help-icon" title="Deployment folder name">?</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        id="folder-name" 
+                                        class="form-input"
+                                        required 
+                                        placeholder="myapp"
+                                        readonly
+                                    >
+                                    <small class="help-text">From your selected folder (auto-filled)</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label for="start-url" class="form-label">
                                         Start URL
                                         <span class="help-icon" title="URL to open when app launches">?</span>
@@ -249,8 +295,24 @@
                                         id="start-url" 
                                         class="form-input"
                                         value="/" 
-                                        placeholder="/"
+                                        placeholder="/myapp/"
                                     >
+                                    <small class="help-text">Auto-updates based on folder name</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="scope" class="form-label">
+                                        Scope
+                                        <span class="help-icon" title="Navigation scope of PWA">?</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        id="scope" 
+                                        class="form-input"
+                                        value="/" 
+                                        placeholder="/myapp/"
+                                    >
+                                    <small class="help-text">Auto-updates based on folder name</small>
                                 </div>
 
                                 <div class="form-group">
@@ -273,26 +335,13 @@
                                         <span class="help-icon" title="Screen orientation preference">?</span>
                                     </label>
                                     <select id="orientation" class="form-input">
-                                        <option value="any" selected>Any</option>
+                                        <option value="any">Any</option>
                                         <option value="portrait">Portrait</option>
                                         <option value="landscape">Landscape</option>
-                                        <option value="portrait-primary">Portrait Primary</option>
+                                        <option value="portrait-primary" selected>Portrait Primary</option>
                                         <option value="landscape-primary">Landscape Primary</option>
                                     </select>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="scope" class="form-label">
-                                        Scope
-                                        <span class="help-icon" title="Navigation scope of PWA">?</span>
-                                    </label>
-                                    <input 
-                                        type="text" 
-                                        id="scope" 
-                                        class="form-input"
-                                        value="/" 
-                                        placeholder="/"
-                                    >
+                                    <small class="help-text">Default: Portrait Primary</small>
                                 </div>
                             </div>
                         </div>
@@ -312,7 +361,7 @@
                                     <option value="stale-while-revalidate" selected>Stale While Revalidate - Balanced approach (Recommended)</option>
                                 </select>
                                 <small class="help-text strategy-description">
-                                    Serves cached content while fetching updates in background
+                                    Serves cached content while fetching updates in background. All your files will be cached.
                                 </small>
                             </div>
 
@@ -369,54 +418,37 @@
                         <div class="success-stats" id="success-stats">
                             <div class="stat">
                                 <span class="stat-value" id="files-generated">0</span>
-                                <span class="stat-label">Files Generated</span>
+                                <span class="stat-label">Total Files</span>
                             </div>
                             <div class="stat">
                                 <span class="stat-value" id="icons-generated">0</span>
                                 <span class="stat-label">Icons Created</span>
                             </div>
+                            <div class="stat">
+                                <span class="stat-value" id="folders-preserved">0</span>
+                                <span class="stat-label">Folders Preserved</span>
+                            </div>
                         </div>
                     </div>
 
                     <div class="download-section-content">
-                        <h3>Download Individual Files</h3>
-                        <div class="download-grid">
-                            <button class="download-btn" data-file="index.html">
-                                <span class="download-icon">📄</span>
-                                <span class="download-label">index.html</span>
-                                <span class="download-size" id="size-html"></span>
-                            </button>
-                            <button class="download-btn" data-file="manifest.json">
-                                <span class="download-icon">⚙️</span>
-                                <span class="download-label">manifest.json</span>
-                                <span class="download-size" id="size-manifest"></span>
-                            </button>
-                            <button class="download-btn" data-file="sw.js">
-                                <span class="download-icon">🔧</span>
-                                <span class="download-label">sw.js</span>
-                                <span class="download-size" id="size-sw"></span>
-                            </button>
-                            <button class="download-btn" data-file="style.css" id="css-download" style="display:none">
-                                <span class="download-icon">🎨</span>
-                                <span class="download-label">style.css</span>
-                                <span class="download-size" id="size-css"></span>
-                            </button>
-                            <button class="download-btn" data-file="script.js" id="js-download" style="display:none">
-                                <span class="download-icon">⚡</span>
-                                <span class="download-label">script.js</span>
-                                <span class="download-size" id="size-js"></span>
-                            </button>
-                            <button class="download-btn" data-file="offline.html" id="offline-download" style="display:none">
-                                <span class="download-icon">📱</span>
-                                <span class="download-label">offline.html</span>
-                                <span class="download-size" id="size-offline"></span>
-                            </button>
-                        </div>
-
                         <button id="download-all" class="btn btn-primary btn-large btn-download-all">
                             <span class="btn-icon">📦</span>
-                            Download All Files (ZIP)
+                            Download Complete PWA (ZIP)
                         </button>
+                        
+                        <div class="zip-contents-info">
+                            <h4>📦 ZIP Package Contains:</h4>
+                            <ul>
+                                <li>✅ All your original files and folders (preserved)</li>
+                                <li>✅ Enhanced index.html (with PWA code)</li>
+                                <li>✅ manifest.json (PWA manifest)</li>
+                                <li>✅ sw.js (Service Worker - caches all files)</li>
+                                <li>✅ icons/ folder (8 generated icons)</li>
+                                <li>✅ offline.html (if enabled)</li>
+                                <li>✅ README.md (deployment instructions)</li>
+                            </ul>
+                        </div>
                     </div>
 
                     <div class="instructions-box">
@@ -424,23 +456,23 @@
                         <ol class="instructions-list">
                             <li>
                                 <strong>Extract the ZIP file</strong>
-                                <p>Unzip all files to your project directory</p>
+                                <p>Unzip all files to your pwaApps folder</p>
                             </li>
                             <li>
-                                <strong>Upload to your web server</strong>
-                                <p>Ensure all files are in the root directory or same folder</p>
+                                <strong>Verify folder structure</strong>
+                                <p>All your original files + PWA files should be present</p>
                             </li>
                             <li>
-                                <strong>Serve over HTTPS</strong>
-                                <p>PWAs require a secure connection (HTTPS is mandatory)</p>
+                                <strong>Start Python server</strong>
+                                <p>Run from pwaApps folder: <code>python -m http.server 8000</code></p>
                             </li>
                             <li>
-                                <strong>Test your PWA</strong>
-                                <p>Open Chrome DevTools → Lighthouse → Run PWA audit</p>
+                                <strong>Access your PWA</strong>
+                                <p>Open: <code>http://localhost:8000/<span id="folder-url-display">yourapp</span>/</code></p>
                             </li>
                             <li>
                                 <strong>Install on device</strong>
-                                <p>Look for the "Install" button in the browser address bar</p>
+                                <p>Click "Install" button in Chrome browser</p>
                             </li>
                         </ol>
                     </div>
@@ -474,9 +506,8 @@
                     <div class="info-box">
                         <span class="info-icon">💡</span>
                         <div class="info-content">
-                            <strong>Testing Locally?</strong> Use a local server with HTTPS. 
-                            Try <code>npx serve -s</code> or <code>python -m http.server</code> 
-                            (note: localhost is exempt from HTTPS requirement for testing)
+                            <strong>Perfect for Multi-App Setup!</strong> Your PWA is configured to work in a subfolder. 
+                            All your files, subfolders, and assets have been preserved in the final package.
                         </div>
                     </div>
                 </div>

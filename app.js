@@ -1,8 +1,9 @@
 /**
  * PWA Converter - Main Application Logic
  * Converts standard web applications into Progressive Web Apps
+ * FOLDER UPLOAD VERSION - Preserves entire folder structure
  * 
- * @version 1.0.0
+ * @version 2.0.1
  * @author PWA Converter Team
  */
 
@@ -14,12 +15,20 @@
 
 class PWAConverter {
     constructor() {
-        // File storage
+        // File storage - UPDATED for folder upload
         this.files = {
-            html: null,
-            css: null,
-            js: null,
-            icon: null
+            folderName: null,           // Original folder name
+            sanitizedName: null,        // Sanitized folder name for URLs
+            allFiles: [],               // Array of all files from folder
+            totalSize: 0,               // Total folder size
+            
+            // Quick references to important files
+            index: null,                // index.html content
+            css: null,                  // CSS file content (if exists)
+            js: null,                   // JavaScript content (if exists)
+            
+            // Separate icon upload (kept as before)
+            icon: null                  // App icon for generation
         };
 
         // Configuration storage
@@ -39,18 +48,20 @@ class PWAConverter {
         this.setupEventListeners();
         this.setupColorInputSync();
         this.setupCacheStrategyDescription();
-        console.log('PWA Converter initialized successfully');
+        console.log('PWA Converter initialized successfully (v2.0.1 - Folder Upload)');
     }
 
     /**
      * Set up all event listeners
      */
     setupEventListeners() {
-        // File upload handlers
-        document.getElementById('app-folder').addEventListener('change', (e) => 
+        // Folder upload handler (NEW)
+        document.getElementById('folder-input').addEventListener('change', (e) => 
             this.handleFolderUpload(e));
+
+        // Icon upload handler (kept separate)
         document.getElementById('icon-file').addEventListener('change', (e) => 
-            this.handleFileUpload(e, 'icon'));
+            this.handleIconUpload(e));
 
         // Navigation buttons
         document.getElementById('next-to-config').addEventListener('click', () => 
@@ -64,14 +75,7 @@ class PWAConverter {
         document.getElementById('pwa-config-form').addEventListener('submit', (e) => 
             this.generatePWA(e));
 
-        // Download buttons
-        document.querySelectorAll('.download-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const filename = btn.getAttribute('data-file');
-                this.downloadFile(filename);
-            });
-        });
-
+        // Download button
         document.getElementById('download-all').addEventListener('click', () => 
             this.downloadAll());
 
@@ -81,6 +85,498 @@ class PWAConverter {
             if (!shortNameInput.value || shortNameInput.value === '') {
                 shortNameInput.value = e.target.value.substring(0, 12);
             }
+        });
+
+        // Auto-generate app ID from short name
+        document.getElementById('short-name').addEventListener('input', (e) => {
+            const appIdInput = document.getElementById('app-id');
+            if (!appIdInput.dataset.userModified) {
+                const appId = this.sanitizeFolderName(e.target.value) + '-id';
+                appIdInput.value = appId;
+            }
+        });
+
+        // Update start URL and scope when folder name changes
+        document.getElementById('folder-name').addEventListener('input', (e) => {
+            this.updateUrlFields(e.target.value);
+        });
+
+        // Track manual modifications to prevent auto-updates
+        ['app-id', 'start-url', 'scope'].forEach(fieldId => {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                field.addEventListener('focus', () => {
+                    field.dataset.userModified = 'true';
+                });
+            }
+        });
+    }
+
+    /**
+     * Handle folder upload (NEW MAIN FUNCTION)
+     */
+    async handleFolderUpload(event) {
+        const files = Array.from(event.target.files);
+        
+        if (files.length === 0) {
+            return;
+        }
+
+        const statusElement = document.getElementById('folder-status');
+        const infoElement = document.getElementById('folder-info');
+        const contentsElement = document.getElementById('folder-contents');
+        const treeElement = document.getElementById('folder-tree');
+
+        statusElement.textContent = 'Processing folder...';
+        statusElement.className = 'file-status';
+
+        try {
+            // Extract folder name from first file
+            const folderPath = files[0].webkitRelativePath || files[0].name;
+            const folderName = folderPath.split('/')[0];
+            
+            this.files.folderName = folderName;
+            this.files.sanitizedName = this.sanitizeFolderName(folderName);
+
+            // Calculate total size
+            this.files.totalSize = files.reduce((sum, file) => sum + file.size, 0);
+
+            // Check folder size limits
+            const maxSize = 100 * 1024 * 1024; // 100MB
+            const warnSize = 50 * 1024 * 1024; // 50MB
+
+            if (this.files.totalSize > maxSize) {
+                throw new Error(`Folder too large (${this.formatFileSize(this.files.totalSize)}). Maximum size is 100MB.`);
+            }
+
+            if (this.files.totalSize > warnSize) {
+                statusElement.textContent = `⚠ Warning: Large folder (${this.formatFileSize(this.files.totalSize)}). Processing may take time...`;
+                statusElement.className = 'file-status warning';
+                await this.delay(1000);
+            }
+
+            // Process all files
+            await this.processAllFiles(files);
+
+            // Validate folder structure
+            this.validateFolderStructure();
+
+            // Auto-fill configuration fields
+            this.autoFillConfiguration();
+
+            // Show success status
+            statusElement.textContent = `✓ Folder "${folderName}" loaded successfully (${files.length} files, ${this.formatFileSize(this.files.totalSize)})`;
+            statusElement.className = 'file-status success';
+
+            // Show folder info
+            infoElement.textContent = `Total: ${files.length} files in ${this.countFolders(files)} folders`;
+            infoElement.className = 'file-info visible';
+
+            // Display folder tree
+            this.displayFolderTree(files, treeElement);
+            contentsElement.style.display = 'block';
+
+            // Enable next button
+            document.getElementById('next-to-config').disabled = false;
+
+            this.showToast(`Folder "${folderName}" uploaded successfully!`, 'success');
+
+        } catch (error) {
+            statusElement.textContent = `✗ Error: ${error.message}`;
+            statusElement.className = 'file-status error';
+            this.files = {
+                folderName: null,
+                sanitizedName: null,
+                allFiles: [],
+                totalSize: 0,
+                index: null,
+                css: null,
+                js: null,
+                icon: null
+            };
+            infoElement.className = 'file-info';
+            contentsElement.style.display = 'none';
+            document.getElementById('next-to-config').disabled = true;
+            this.showToast(`Failed to upload folder: ${error.message}`, 'error');
+            console.error('Folder upload error:', error);
+        }
+    }
+
+    /**
+     * Process all files from folder
+     */
+    async processAllFiles(files) {
+        this.files.allFiles = [];
+        
+        for (const file of files) {
+            const relativePath = this.getRelativePath(file);
+            
+            // Store file info
+            const fileInfo = {
+                path: relativePath,
+                blob: file,
+                type: file.type || this.guessFileType(relativePath),
+                size: file.size,
+                name: file.name
+            };
+
+            this.files.allFiles.push(fileInfo);
+
+            // Read important files
+            if (relativePath === 'index.html') {
+                this.files.index = {
+                    path: relativePath,
+                    content: await this.readTextFile(file),
+                    blob: file
+                };
+            } else if (relativePath.endsWith('.css') && !this.files.css) {
+                // Store first CSS file found
+                this.files.css = {
+                    path: relativePath,
+                    content: await this.readTextFile(file),
+                    blob: file
+                };
+            } else if (relativePath.endsWith('.js') && !this.files.js) {
+                // Store first JS file found (excluding node_modules, etc.)
+                if (!relativePath.includes('node_modules') && !relativePath.includes('dist')) {
+                    this.files.js = {
+                        path: relativePath,
+                        content: await this.readTextFile(file),
+                        blob: file
+                    };
+                }
+            }
+        }
+    }
+
+    /**
+     * Get relative path from file
+     */
+    getRelativePath(file) {
+        const fullPath = file.webkitRelativePath || file.name;
+        const parts = fullPath.split('/');
+        // Remove first part (folder name) to get relative path
+        return parts.slice(1).join('/');
+    }
+
+    /**
+     * Guess file type from extension
+     */
+    guessFileType(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const types = {
+            'html': 'text/html',
+            'css': 'text/css',
+            'js': 'application/javascript',
+            'json': 'application/json',
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'svg': 'image/svg+xml',
+            'webp': 'image/webp',
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'ogg': 'audio/ogg',
+            'mp4': 'video/mp4',
+            'webm': 'video/webm',
+            'woff': 'font/woff',
+            'woff2': 'font/woff2',
+            'ttf': 'font/ttf',
+            'txt': 'text/plain',
+            'xml': 'application/xml'
+        };
+        return types[ext] || 'application/octet-stream';
+    }
+
+    /**
+     * Validate folder structure
+     */
+    validateFolderStructure() {
+        // Check if index.html exists in root
+        if (!this.files.index) {
+            throw new Error('index.html not found in folder root. Please make sure index.html is in the root of your selected folder.');
+        }
+
+        // Validate HTML content
+        if (!this.validateHTML(this.files.index.content)) {
+            throw new Error('index.html appears to be invalid. Please check your HTML file.');
+        }
+    }
+
+    /**
+     * Validate HTML content
+     */
+    validateHTML(content) {
+        const lower = content.toLowerCase();
+        return lower.includes('<!doctype') || lower.includes('<html');
+    }
+
+    /**
+     * Count folders in file list
+     */
+    countFolders(files) {
+        const folders = new Set();
+        files.forEach(file => {
+            const path = file.webkitRelativePath || file.name;
+            const parts = path.split('/');
+            for (let i = 0; i < parts.length - 1; i++) {
+                folders.add(parts.slice(0, i + 2).join('/'));
+            }
+        });
+        return folders.size;
+    }
+
+    /**
+     * Display folder tree
+     */
+    displayFolderTree(files, container) {
+        const tree = this.buildFileTree(files);
+        container.innerHTML = this.renderFileTree(tree, 0);
+    }
+
+    /**
+     * Build file tree structure
+     */
+    buildFileTree(files) {
+        const tree = {};
+        
+        files.forEach(file => {
+            const path = this.getRelativePath(file);
+            const parts = path.split('/');
+            
+            let current = tree;
+            parts.forEach((part, index) => {
+                if (index === parts.length - 1) {
+                    // It's a file
+                    if (!current._files) current._files = [];
+                    current._files.push({ name: part, path: path, file: file });
+                } else {
+                    // It's a folder
+                    if (!current[part]) current[part] = {};
+                    current = current[part];
+                }
+            });
+        });
+        
+        return tree;
+    }
+
+    /**
+     * Render file tree as HTML
+     */
+    renderFileTree(tree, level) {
+        let html = '';
+        const indent = '  '.repeat(level);
+        
+        // Render folders first
+        Object.keys(tree).forEach(key => {
+            if (key !== '_files') {
+                html += `<div class="folder-tree-item subfolder" style="padding-left: ${level * 1.5}rem">`;
+                html += `<span class="folder-tree-icon">📁</span> ${key}/`;
+                html += `</div>`;
+                html += this.renderFileTree(tree[key], level + 1);
+            }
+        });
+        
+        // Render files
+        if (tree._files) {
+            tree._files.forEach(fileInfo => {
+                const isImportant = fileInfo.name === 'index.html' || 
+                                   fileInfo.name.endsWith('.css') || 
+                                   fileInfo.name.endsWith('.js');
+                const className = isImportant ? 'folder-tree-item file important' : 'folder-tree-item file';
+                html += `<div class="${className}" style="padding-left: ${level * 1.5}rem">`;
+                html += `<span class="folder-tree-icon">${this.getFileIcon(fileInfo.name)}</span> ${fileInfo.name}`;
+                html += `</div>`;
+            });
+        }
+        
+        return html;
+    }
+
+    /**
+     * Get icon for file type
+     */
+    getFileIcon(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const icons = {
+            'html': '📄',
+            'css': '🎨',
+            'js': '⚡',
+            'json': '📋',
+            'png': '🖼️',
+            'jpg': '🖼️',
+            'jpeg': '🖼️',
+            'gif': '🖼️',
+            'svg': '🖼️',
+            'mp3': '🎵',
+            'wav': '🎵',
+            'ogg': '🎵',
+            'mp4': '🎬',
+            'webm': '🎬',
+            'txt': '📝',
+            'md': '📝'
+        };
+        return icons[ext] || '📄';
+    }
+
+    /**
+     * Sanitize folder name for use in URLs
+     */
+    sanitizeFolderName(name) {
+        return name
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, '-')           // Replace spaces with hyphens
+            .replace(/[^a-z0-9-]/g, '')     // Remove special characters
+            .replace(/-+/g, '-')            // Replace multiple hyphens with single
+            .replace(/^-|-$/g, '');         // Remove leading/trailing hyphens
+    }
+
+    /**
+     * Auto-fill configuration from folder and files
+     */
+    autoFillConfiguration() {
+        // Set folder name (read-only)
+        document.getElementById('folder-name').value = this.files.sanitizedName;
+
+        // Generate App ID
+        document.getElementById('app-id').value = this.files.sanitizedName + '-id';
+
+        // Update URL fields
+        this.updateUrlFields(this.files.sanitizedName);
+
+        // Extract metadata from HTML
+        if (this.files.index) {
+            this.extractMetadata(this.files.index.content);
+        }
+
+        // Show sanitization info if name was changed
+        if (this.files.folderName !== this.files.sanitizedName) {
+            this.showToast(
+                `Folder name sanitized: "${this.files.folderName}" → "${this.files.sanitizedName}"`, 
+                'info'
+            );
+        }
+    }
+
+    /**
+     * Update URL fields based on folder name
+     */
+    updateUrlFields(folderName) {
+        if (!folderName) return;
+
+        const startUrlInput = document.getElementById('start-url');
+        const scopeInput = document.getElementById('scope');
+
+        // Only update if user hasn't manually modified these fields
+        if (!startUrlInput.dataset.userModified) {
+            startUrlInput.value = `/${folderName}/`;
+        }
+
+        if (!scopeInput.dataset.userModified) {
+            scopeInput.value = `/${folderName}/`;
+        }
+    }
+
+    /**
+     * Extract metadata from HTML
+     */
+    extractMetadata(html) {
+        // Extract title
+        const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+        if (titleMatch && !document.getElementById('app-name').value) {
+            const title = titleMatch[1].trim();
+            document.getElementById('app-name').value = title;
+            
+            const shortName = title.substring(0, 12);
+            if (!document.getElementById('short-name').value) {
+                document.getElementById('short-name').value = shortName;
+            }
+        }
+
+        // Extract theme color
+        const themeMatch = html.match(/<meta\s+name=["']theme-color["']\s+content=["'](.*?)["']/i);
+        if (themeMatch) {
+            const color = themeMatch[1];
+            document.getElementById('theme-color').value = color;
+            document.getElementById('theme-color-text').value = color.toUpperCase();
+        }
+
+        // Extract description
+        const descMatch = html.match(/<meta\s+name=["']description["']\s+content=["'](.*?)["']/i);
+        if (descMatch && !document.getElementById('description').value) {
+            document.getElementById('description').value = descMatch[1];
+        }
+    }
+
+    /**
+     * Handle icon upload (kept separate as before)
+     */
+    async handleIconUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const statusElement = document.getElementById('icon-status');
+        const infoElement = document.getElementById('icon-info');
+
+        statusElement.textContent = 'Processing...';
+        statusElement.className = 'file-status';
+
+        try {
+            this.files.icon = await this.processIcon(file);
+
+            statusElement.textContent = `✓ ${file.name} loaded successfully`;
+            statusElement.className = 'file-status success';
+
+            infoElement.textContent = `Size: ${this.formatFileSize(file.size)} | ${this.files.icon.width}x${this.files.icon.height}`;
+            infoElement.className = 'file-info visible';
+
+            this.showToast(`Icon ${file.name} uploaded successfully`, 'success');
+
+        } catch (error) {
+            statusElement.textContent = `✗ Error: ${error.message}`;
+            statusElement.className = 'file-status error';
+            this.files.icon = null;
+            infoElement.className = 'file-info';
+            this.showToast(`Failed to upload icon: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * Process image icon
+     */
+    processIcon(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    resolve({
+                        dataUrl: e.target.result,
+                        width: img.width,
+                        height: img.height,
+                        file: file
+                    });
+                };
+                img.onerror = () => reject(new Error('Invalid image file'));
+                img.src = e.target.result;
+            };
+            reader.onerror = () => reject(new Error('Failed to read image'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    /**
+     * Read file as text
+     */
+    readTextFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsText(file);
         });
     }
 
@@ -127,218 +623,14 @@ class PWAConverter {
         const description = document.querySelector('.strategy-description');
 
         const descriptions = {
-            'cache-first': 'Serves cached content immediately, updates cache in background (fastest, may show stale content)',
-            'network-first': 'Always tries network first, falls back to cache if offline (fresh content, slower)',
-            'stale-while-revalidate': 'Serves cached content while fetching updates in background (balanced approach)'
+            'cache-first': 'Serves cached content immediately, updates cache in background (fastest, may show stale content). All your files will be cached.',
+            'network-first': 'Always tries network first, falls back to cache if offline (fresh content, slower). All your files will be cached.',
+            'stale-while-revalidate': 'Serves cached content while fetching updates in background (balanced approach). All your files will be cached.'
         };
 
         cacheStrategy.addEventListener('change', (e) => {
             description.textContent = descriptions[e.target.value];
         });
-    }
-
-    /**
-     * Handle folder upload
-     */
-    async handleFolderUpload(event) {
-        const files = event.target.files;
-        if (!files || files.length === 0) return;
-
-        const statusElement = document.getElementById('folder-status');
-        const infoElement = document.getElementById('folder-info');
-
-        statusElement.textContent = 'Processing...';
-        statusElement.className = 'file-status';
-
-        // Reset previous files
-        this.files.html = null;
-        this.files.css = null;
-        this.files.js = null;
-
-        try {
-            const fileArray = Array.from(files);
-
-            // Find HTML file (prioritize index.html)
-            let htmlFile = fileArray.find(f => f.name.toLowerCase() === 'index.html');
-            if (!htmlFile) {
-                htmlFile = fileArray.find(f => f.name.toLowerCase().endsWith('.html') || f.name.toLowerCase().endsWith('.htm'));
-            }
-
-            if (!htmlFile) {
-                throw new Error('No HTML file found in the selected folder.');
-            }
-
-            // Find CSS and JS files
-            const cssFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.css'));
-            const jsFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.js'));
-
-            // Read HTML file
-            const htmlContent = await this.readFile(htmlFile);
-            if (!this.validateHTML(htmlContent)) {
-                throw new Error('Invalid HTML file - must contain HTML tags');
-            }
-            this.files.html = htmlContent;
-
-            // Read and concatenate CSS files
-            if (cssFiles.length > 0) {
-                let cssContent = '';
-                for (const file of cssFiles) {
-                    cssContent += await this.readFile(file) + '\n';
-                }
-                this.files.css = cssContent;
-            }
-
-            // Read and concatenate JS files
-            if (jsFiles.length > 0) {
-                let jsContent = '';
-                for (const file of jsFiles) {
-                    jsContent += await this.readFile(file) + '\n';
-                }
-                this.files.js = jsContent;
-            }
-
-            // Update UI
-            const totalSize = fileArray.reduce((acc, file) => acc + file.size, 0);
-            statusElement.textContent = `✓ Folder loaded successfully`;
-            statusElement.className = 'file-status success';
-            
-            let infoText = `Found: ${htmlFile.name}`;
-            if (cssFiles.length > 0) infoText += `, ${cssFiles.length} CSS file(s)`;
-            if (jsFiles.length > 0) infoText += `, ${jsFiles.length} JS file(s)`;
-            
-            infoElement.textContent = `${infoText}. Total size: ${this.formatFileSize(totalSize)}`;
-            infoElement.className = 'file-info visible';
-
-            // Extract metadata from HTML
-            this.extractMetadata(this.files.html);
-
-            // Enable next button
-            document.getElementById('next-to-config').disabled = false;
-
-            this.showToast('Folder processed successfully', 'success');
-
-        } catch (error) {
-            statusElement.textContent = `✗ Error: ${error.message}`;
-            statusElement.className = 'file-status error';
-            this.files.html = null;
-            this.files.css = null;
-            this.files.js = null;
-            infoElement.className = 'file-info';
-            document.getElementById('next-to-config').disabled = true;
-            this.showToast(`Failed to process folder: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * Handle file upload
-     */
-    async handleFileUpload(event, fileType) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const statusElement = document.getElementById(`${fileType}-status`);
-        const infoElement = document.getElementById(`${fileType}-info`);
-
-        statusElement.textContent = 'Processing...';
-        statusElement.className = 'file-status';
-
-        try {
-            if (fileType === 'icon') {
-                this.files[fileType] = await this.processIcon(file);
-            } else {
-                throw new Error(`Unsupported file type for single upload: ${fileType}`);
-            }
-
-            // Show success status
-            statusElement.textContent = `✓ ${file.name} loaded successfully`;
-            statusElement.className = 'file-status success';
-
-            // Show file info
-            infoElement.textContent = `Size: ${this.formatFileSize(file.size)}`;
-            infoElement.className = 'file-info visible';
-
-            this.showToast(`${file.name} uploaded successfully`, 'success');
-
-        } catch (error) {
-            statusElement.textContent = `✗ Error: ${error.message}`;
-            statusElement.className = 'file-status error';
-            this.files[fileType] = null;
-            infoElement.className = 'file-info';
-            this.showToast(`Failed to upload ${file.name}: ${error.message}`, 'error');
-        }
-    }
-
-    /**
-     * Read file as text
-     */
-    readFile(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = () => reject(new Error('Failed to read file'));
-            reader.readAsText(file);
-        });
-    }
-
-    /**
-     * Process image icon
-     */
-    processIcon(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    resolve({
-                        dataUrl: e.target.result,
-                        width: img.width,
-                        height: img.height,
-                        file: file
-                    });
-                };
-                img.onerror = () => reject(new Error('Invalid image file'));
-                img.src = e.target.result;
-            };
-            reader.onerror = () => reject(new Error('Failed to read image'));
-            reader.readAsDataURL(file);
-        });
-    }
-
-    /**
-     * Validate HTML content
-     */
-    validateHTML(content) {
-        return content.toLowerCase().includes('<!doctype') || 
-               content.toLowerCase().includes('<html');
-    }
-
-    /**
-     * Extract metadata from HTML
-     */
-    extractMetadata(html) {
-        // Extract title
-        const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-        if (titleMatch && !document.getElementById('app-name').value) {
-            const title = titleMatch[1].trim();
-            document.getElementById('app-name').value = title;
-            document.getElementById('short-name').value = title.substring(0, 12);
-        }
-
-        // Extract theme color
-        const themeMatch = html.match(/<meta\s+name=["']theme-color["']\s+content=["'](.*?)["']/i);
-        if (themeMatch) {
-            const color = themeMatch[1];
-            document.getElementById('theme-color').value = color;
-            document.getElementById('theme-color-text').value = color.toUpperCase();
-        }
-
-        // Extract description
-        const descMatch = html.match(/<meta\s+name=["']description["']\s+content=["'](.*?)["']/i);
-        if (descMatch) {
-            document.getElementById('description').value = descMatch[1];
-        }
-
-        this.showToast('Metadata extracted from HTML', 'info');
     }
 
     /**
@@ -365,6 +657,8 @@ class PWAConverter {
             this.config = {
                 name: document.getElementById('app-name').value,
                 shortName: document.getElementById('short-name').value,
+                appId: document.getElementById('app-id').value,
+                folderName: document.getElementById('folder-name').value,
                 description: document.getElementById('description').value,
                 themeColor: document.getElementById('theme-color').value,
                 backgroundColor: document.getElementById('background-color').value,
@@ -392,12 +686,7 @@ class PWAConverter {
             await this.delay(300);
             this.generatedFiles.html = this.injectPWACode();
 
-            // Process CSS if provided
-            if (this.files.css) {
-                this.generatedFiles.css = this.files.css;
-            }
-
-            // Process JavaScript if provided
+            // Process JavaScript if exists
             if (this.files.js) {
                 this.updateLoadingStatus('Enhancing JavaScript...');
                 await this.delay(300);
@@ -413,10 +702,10 @@ class PWAConverter {
 
             // Generate icons
             if (this.files.icon) {
-                this.updateLoadingStatus('Generating app icons...');
+                this.updateLoadingStatus('Generating app icons from uploaded image...');
                 await this.generateIcons();
             } else {
-                this.updateLoadingStatus('Creating default icons...');
+                this.updateLoadingStatus('Creating default app icons...');
                 await this.generateDefaultIcons();
             }
 
@@ -439,6 +728,7 @@ class PWAConverter {
      */
     generateManifest() {
         const manifest = {
+            id: this.config.appId,
             name: this.config.name,
             short_name: this.config.shortName,
             description: this.config.description,
@@ -462,27 +752,34 @@ class PWAConverter {
             });
         });
 
-        // Add categories if applicable
+        // Add categories
         manifest.categories = ['utilities', 'productivity'];
 
         return JSON.stringify(manifest, null, 2);
     }
 
     /**
-     * Generate service worker
+     * Generate service worker with ALL user files
      */
     generateServiceWorker() {
-        const cacheName = `${this.config.shortName.toLowerCase().replace(/\s+/g, '-')}-v1`;
+        const cacheName = `${this.config.folderName}-v1`;
         
+        // Build URLs to cache - include ALL user files
         const urlsToCache = [
             this.config.startUrl,
-            '/index.html',
-            '/manifest.json'
+            `${this.config.startUrl}index.html`,
+            `${this.config.startUrl}manifest.json`
         ];
 
-        if (this.files.css) urlsToCache.push('/style.css');
-        if (this.files.js) urlsToCache.push('/script.js');
-        if (this.config.enableOffline) urlsToCache.push('/offline.html');
+        // Add all user files to cache
+        this.files.allFiles.forEach(file => {
+            urlsToCache.push(`${this.config.startUrl}${file.path}`);
+        });
+
+        // Add offline page if enabled
+        if (this.config.enableOffline) {
+            urlsToCache.push(`${this.config.startUrl}offline.html`);
+        }
 
         const cacheStrategies = {
             'cache-first': this.generateCacheFirstStrategy(),
@@ -492,25 +789,31 @@ class PWAConverter {
 
         return `/**
  * Service Worker for ${this.config.name}
- * Generated by PWA Converter
+ * Generated by PWA Converter v2.0.1
  * Cache Strategy: ${this.config.cacheStrategy}
+ * Folder: ${this.config.folderName}
+ * Total Files Cached: ${urlsToCache.length}
  */
 
 const CACHE_NAME = '${cacheName}';
-const OFFLINE_URL = '${this.config.enableOffline ? '/offline.html' : ''}';
+const OFFLINE_URL = '${this.config.enableOffline ? `${this.config.startUrl}offline.html` : ''}';
 
 const urlsToCache = ${JSON.stringify(urlsToCache, null, 2)};
 
-// Install event - cache resources
+// Install event - cache ALL resources
 self.addEventListener('install', event => {
-    console.log('[Service Worker] Installing...');
+    console.log('[Service Worker] Installing for ${this.config.name}...');
+    console.log('[Service Worker] Caching ${urlsToCache.length} files...');
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
-                console.log('[Service Worker] Caching app shell');
+                console.log('[Service Worker] Caching app shell and all files');
                 return cache.addAll(urlsToCache);
             })
-            .then(() => self.skipWaiting())
+            .then(() => {
+                console.log('[Service Worker] All files cached successfully');
+                return self.skipWaiting();
+            })
             .catch(error => {
                 console.error('[Service Worker] Cache failed:', error);
             })
@@ -559,14 +862,16 @@ function isNavigationRequest(request) {
            (request.method === 'GET' && request.headers.get('accept').includes('text/html'));
 }
 
-console.log('[Service Worker] Loaded successfully');`;
+console.log('[Service Worker] Loaded successfully for ${this.config.name}');
+console.log('[Service Worker] Scope: ${this.config.scope}');
+console.log('[Service Worker] Caching ${urlsToCache.length} files including all your assets');`;
     }
 
     /**
      * Generate cache-first strategy
      */
     generateCacheFirstStrategy() {
-        return `    // Cache First Strategy
+        return `    // Cache First Strategy - Serves cached content immediately
     if (event.request.method !== 'GET') {
         return;
     }
@@ -604,7 +909,7 @@ console.log('[Service Worker] Loaded successfully');`;
      * Generate network-first strategy
      */
     generateNetworkFirstStrategy() {
-        return `    // Network First Strategy
+        return `    // Network First Strategy - Always tries network first
     if (event.request.method !== 'GET') {
         return;
     }
@@ -639,7 +944,7 @@ console.log('[Service Worker] Loaded successfully');`;
      * Generate stale-while-revalidate strategy
      */
     generateStaleWhileRevalidateStrategy() {
-        return `    // Stale While Revalidate Strategy
+        return `    // Stale While Revalidate Strategy - Balanced approach
     if (event.request.method !== 'GET') {
         return;
     }
@@ -678,8 +983,8 @@ self.addEventListener('push', event => {
     
     const options = {
         body: event.data ? event.data.text() : 'New notification from ${this.config.name}',
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/icon-72x72.png',
+        icon: '${this.config.startUrl}icons/icon-192x192.png',
+        badge: '${this.config.startUrl}icons/icon-72x72.png',
         vibrate: [200, 100, 200],
         tag: 'notification-tag',
         requireInteraction: false,
@@ -708,10 +1013,10 @@ self.addEventListener('notificationclick', event => {
     }
 
     /**
-     * Inject PWA code into HTML
+     * Inject PWA code into HTML - RELATIVE PATHS
      */
     injectPWACode() {
-        let html = this.files.html;
+        let html = this.files.index.content;
 
         // Ensure viewport meta tag
         if (!html.toLowerCase().includes('viewport')) {
@@ -727,13 +1032,13 @@ self.addEventListener('notificationclick', event => {
             html = html.replace(/<\/head>/i, `    ${themeColorTag}\n</head>`);
         }
 
-        // Add manifest link
+        // Add manifest link - RELATIVE PATH
         const manifestLink = '<link rel="manifest" href="manifest.json">';
         if (!html.toLowerCase().includes('manifest')) {
             html = html.replace(/<\/head>/i, `    ${manifestLink}\n</head>`);
         }
 
-        // Add apple-specific meta tags
+        // Add apple-specific meta tags - RELATIVE PATHS
         const appleMeta = `    <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="${this.config.shortName}">
@@ -743,15 +1048,21 @@ self.addEventListener('notificationclick', event => {
             html = html.replace(/<\/head>/i, `${appleMeta}\n</head>`);
         }
 
-        // Add service worker registration
+        // Add service worker registration - RELATIVE PATH
         const swRegistration = `
     <script>
         // PWA Service Worker Registration
+        // Generated by PWA Converter v2.0.1
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
+                // Use RELATIVE path for service worker (works with multi-app setup)
+                navigator.serviceWorker.register('sw.js')
                     .then(registration => {
                         console.log('✓ Service Worker registered:', registration.scope);
+                        console.log('✓ Service Worker URL:', registration.active ? registration.active.scriptURL : 'installing...');
+                        console.log('✓ App: ${this.config.name}');
+                        console.log('✓ Folder: ${this.config.folderName}');
+                        console.log('✓ Total files cached: ${this.files.allFiles.length + 3}'); // +3 for manifest, sw, offline
                         
                         // Check for updates periodically
                         setInterval(() => {
@@ -762,6 +1073,8 @@ self.addEventListener('notificationclick', event => {
                         console.error('✗ Service Worker registration failed:', error);
                     });
             });
+        } else {
+            console.warn('⚠ Service Workers not supported in this browser');
         }
 
         // PWA Install Prompt
@@ -769,18 +1082,20 @@ self.addEventListener('notificationclick', event => {
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             deferredPrompt = e;
+            console.log('💡 PWA install prompt available');
             // Show custom install UI
             showInstallPromotion();
         });
 
         function showInstallPromotion() {
             // You can implement custom install UI here
-            console.log('PWA install prompt available');
+            console.log('📱 App can be installed - Click browser menu or use custom UI');
         }
 
-        // Show install button (example)
+        // Install PWA function (call from your custom install button)
         async function installPWA() {
             if (!deferredPrompt) {
+                console.log('❌ Install prompt not available');
                 return;
             }
             deferredPrompt.prompt();
@@ -791,7 +1106,10 @@ self.addEventListener('notificationclick', event => {
 
         // Track installation
         window.addEventListener('appinstalled', () => {
-            console.log('✓ PWA installed successfully');
+            console.log('✅ PWA installed successfully!');
+            console.log('✅ App: ${this.config.name}');
+            console.log('✅ App ID: ${this.config.appId}');
+            console.log('✅ Folder: ${this.config.folderName}');
             deferredPrompt = null;
         });
 
@@ -806,7 +1124,17 @@ self.addEventListener('notificationclick', event => {
             return 'browser';
         }
 
-        console.log('Display mode:', getPWADisplayMode());
+        const displayMode = getPWADisplayMode();
+        console.log('🖥️ Display mode:', displayMode);
+        
+        // Log PWA configuration
+        console.log('⚙️ PWA Configuration:');
+        console.log('  - App Name: ${this.config.name}');
+        console.log('  - App ID: ${this.config.appId}');
+        console.log('  - Start URL: ${this.config.startUrl}');
+        console.log('  - Scope: ${this.config.scope}');
+        console.log('  - Folder: ${this.config.folderName}');
+        console.log('  - Files included: ${this.files.allFiles.length}');
     </script>`;
 
         html = html.replace(/<\/body>/i, `${swRegistration}\n</body>`);
@@ -820,7 +1148,10 @@ self.addEventListener('notificationclick', event => {
     enhanceJavaScript() {
         const pwaHelpers = `
 // ============================================================================
-// PWA Helper Functions (Auto-generated by PWA Converter)
+// PWA Helper Functions (Auto-generated by PWA Converter v2.0.1)
+// App: ${this.config.name}
+// Folder: ${this.config.folderName}
+// Files: ${this.files.allFiles.length}
 // ============================================================================
 
 /**
@@ -915,8 +1246,8 @@ async function requestNotificationPermission() {
 function showNotification(title, options = {}) {
     if ('Notification' in window && Notification.permission === 'granted') {
         const notification = new Notification(title, {
-            icon: '/icons/icon-192x192.png',
-            badge: '/icons/icon-72x72.png',
+            icon: '${this.config.startUrl}icons/icon-192x192.png',
+            badge: '${this.config.startUrl}icons/icon-72x72.png',
             ...options
         });
         return notification;
@@ -928,7 +1259,7 @@ function showNotification(title, options = {}) {
  * Register background sync
  */
 async function registerBackgroundSync(tag) {
-    if ('serviceWorker' in navigator && 'sync' in registration) {
+    if ('serviceWorker' in navigator && 'sync' in ServiceWorkerRegistration.prototype) {
         try {
             const registration = await navigator.serviceWorker.ready;
             await registration.sync.register(tag);
@@ -948,8 +1279,10 @@ document.addEventListener('DOMContentLoaded', () => {
     requestPersistentStorage();
     checkStorageQuota();
     
-    console.log('PWA features initialized');
-    console.log('Running as PWA:', isPWA());
+    console.log('🚀 PWA features initialized for ${this.config.name}');
+    console.log('📱 Running as PWA:', isPWA());
+    console.log('📂 App folder: ${this.config.folderName}');
+    console.log('📦 Total files: ${this.files.allFiles.length}');
 });
 
 // ============================================================================
@@ -958,7 +1291,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 `;
 
-        return pwaHelpers + (this.files.js || '');
+        return pwaHelpers + (this.files.js ? this.files.js.content : '');
     }
 
     /**
@@ -1030,6 +1363,9 @@ document.addEventListener('DOMContentLoaded', () => {
             border-radius: 8px;
             font-weight: 600;
             transition: transform 0.2s, box-shadow 0.2s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
         }
 
         .retry-btn:hover {
@@ -1070,7 +1406,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="online">
             <h1>You're Back Online!</h1>
             <p>Your connection has been restored.</p>
-            <a href="/" class="retry-btn">Return to App</a>
+            <a href="${this.config.startUrl}" class="retry-btn">Return to App</a>
         </div>
         <div class="connection-status">
             Connection status: <strong id="status">Checking...</strong>
@@ -1090,6 +1426,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('online', updateStatus);
         window.addEventListener('offline', updateStatus);
         updateStatus();
+        
+        console.log('Offline page loaded for ${this.config.name}');
+        console.log('Folder: ${this.config.folderName}');
     </script>
 </body>
 </html>`;
@@ -1188,85 +1527,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * Show download section with file info
+     * FIXED: Changed const to let to allow totalFiles increment
      */
     showDownloadSection() {
-        // Show optional download buttons
-        if (this.generatedFiles.css) {
-            document.getElementById('css-download').style.display = 'flex';
-            document.getElementById('size-css').textContent = 
-                this.formatFileSize(new Blob([this.generatedFiles.css]).size);
+        // Update statistics - FIXED: Changed const to let
+        let totalFiles = this.files.allFiles.length + 3; // +3 for manifest, sw, README
+        
+        // Now we can safely increment
+        if (this.generatedFiles.offline) {
+            totalFiles++;
         }
         
-        if (this.generatedFiles.js) {
-            document.getElementById('js-download').style.display = 'flex';
-            document.getElementById('size-js').textContent = 
-                this.formatFileSize(new Blob([this.generatedFiles.js]).size);
-        }
-
-        if (this.generatedFiles.offline) {
-            document.getElementById('offline-download').style.display = 'flex';
-            document.getElementById('size-offline').textContent = 
-                this.formatFileSize(new Blob([this.generatedFiles.offline]).size);
-        }
-
-        // Update file sizes
-        document.getElementById('size-html').textContent = 
-            this.formatFileSize(new Blob([this.generatedFiles.html]).size);
-        document.getElementById('size-manifest').textContent = 
-            this.formatFileSize(new Blob([this.generatedFiles.manifest]).size);
-        document.getElementById('size-sw').textContent = 
-            this.formatFileSize(new Blob([this.generatedFiles.serviceWorker]).size);
-
-        // Update statistics
-        let filesCount = 3; // HTML, manifest, SW
-        if (this.generatedFiles.css) filesCount++;
-        if (this.generatedFiles.js) filesCount++;
-        if (this.generatedFiles.offline) filesCount++;
-
         const iconsCount = Object.keys(this.generatedFiles.icons || {}).length;
+        const foldersCount = this.countUniqueFolders();
 
-        document.getElementById('files-generated').textContent = filesCount;
+        document.getElementById('files-generated').textContent = totalFiles + iconsCount;
         document.getElementById('icons-generated').textContent = iconsCount;
+        document.getElementById('folders-preserved').textContent = foldersCount;
+
+        // Update folder URL display
+        document.getElementById('folder-url-display').textContent = this.config.folderName;
     }
 
     /**
-     * Download individual file
+     * Count unique folders in file list
      */
-    downloadFile(filename) {
-        let content, mimeType;
-
-        switch (filename) {
-            case 'index.html':
-                content = this.generatedFiles.html;
-                mimeType = 'text/html';
-                break;
-            case 'manifest.json':
-                content = this.generatedFiles.manifest;
-                mimeType = 'application/json';
-                break;
-            case 'sw.js':
-                content = this.generatedFiles.serviceWorker;
-                mimeType = 'application/javascript';
-                break;
-            case 'style.css':
-                content = this.generatedFiles.css;
-                mimeType = 'text/css';
-                break;
-            case 'script.js':
-                content = this.generatedFiles.js;
-                mimeType = 'application/javascript';
-                break;
-            case 'offline.html':
-                content = this.generatedFiles.offline;
-                mimeType = 'text/html';
-                break;
-            default:
-                return;
-        }
-
-        const blob = new Blob([content], { type: mimeType });
-        this.triggerDownload(blob, filename);
-        this.showToast(`Downloaded ${filename}`, 'success');
+    countUniqueFolders() {
+        const folders = new Set();
+        this.files.allFiles.forEach(file => {
+            const parts = file.path.split('/');
+            for (let i = 0; i < parts.length - 1; i++) {
+                folders.add(parts.slice(0, i + 1).join('/'));
+            }
+        });
+        return folders.size;
     }
 
     /**
@@ -1278,22 +1572,32 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const zip = new JSZip();
 
-            // Add main files
-            zip.file('index.html', this.generatedFiles.html);
+            // Add all USER files (preserve structure)
+            this.updateLoadingStatus('Adding your files...');
+            for (const file of this.files.allFiles) {
+                if (file.path === 'index.html') {
+                    // Use modified HTML with PWA code
+                    zip.file('index.html', this.generatedFiles.html);
+                } else if (this.files.js && file.path === this.files.js.path) {
+                    // Use enhanced JavaScript
+                    zip.file(file.path, this.generatedFiles.js);
+                } else {
+                    // Copy file as-is (preserve everything!)
+                    zip.file(file.path, file.blob);
+                }
+            }
+
+            // Add PWA generated files
+            this.updateLoadingStatus('Adding PWA files...');
             zip.file('manifest.json', this.generatedFiles.manifest);
             zip.file('sw.js', this.generatedFiles.serviceWorker);
 
-            if (this.generatedFiles.css) {
-                zip.file('style.css', this.generatedFiles.css);
-            }
-            if (this.generatedFiles.js) {
-                zip.file('script.js', this.generatedFiles.js);
-            }
             if (this.generatedFiles.offline) {
                 zip.file('offline.html', this.generatedFiles.offline);
             }
 
             // Add icons
+            this.updateLoadingStatus('Adding icons...');
             if (this.generatedFiles.icons) {
                 const iconsFolder = zip.folder('icons');
                 for (const [filename, blob] of Object.entries(this.generatedFiles.icons)) {
@@ -1302,6 +1606,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Add README
+            this.updateLoadingStatus('Generating README...');
             const readme = this.generateReadme();
             zip.file('README.md', readme);
 
@@ -1311,12 +1616,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 type: 'blob',
                 compression: 'DEFLATE',
                 compressionOptions: { level: 9 }
+            }, (metadata) => {
+                const percent = metadata.percent.toFixed(0);
+                this.updateLoadingStatus(`Compressing... ${percent}%`);
             });
 
             this.hideLoading();
 
             // Download
-            const filename = `${this.config.shortName.toLowerCase().replace(/\s+/g, '-')}-pwa.zip`;
+            const filename = `${this.config.folderName}-pwa.zip`;
             this.triggerDownload(content, filename);
             this.showToast('All files downloaded successfully!', 'success');
 
@@ -1331,207 +1639,218 @@ document.addEventListener('DOMContentLoaded', () => {
      * Generate README.md file
      */
     generateReadme() {
-        const hasOptionalFiles = this.generatedFiles.css || this.generatedFiles.js;
-        
+        const filesList = this.files.allFiles
+            .slice(0, 20) // Show first 20 files
+            .map(f => `- ${f.path}`)
+            .join('\n');
+        const moreFiles = this.files.allFiles.length > 20 ? `\n- ... and ${this.files.allFiles.length - 20} more files` : '';
+
         return `# ${this.config.name}
 
-Generated by **PWA Converter** - Transform web apps into Progressive Web Apps
+Generated by **PWA Converter v2.0.1** - Folder Upload Edition
 
 ## 📦 Package Contents
 
-This package contains all the files needed to deploy your Progressive Web App:
+This package contains **${this.files.allFiles.length + (this.generatedFiles.offline ? 4 : 3)}** files total:
 
-### Core Files
-- \`index.html\` - Main HTML file with PWA integration
+### Your Original Files (${this.files.allFiles.length} files preserved)
+${filesList}${moreFiles}
+
+### PWA Generated Files
 - \`manifest.json\` - PWA manifest configuration
-- \`sw.js\` - Service Worker for offline support and caching
-${this.generatedFiles.css ? '- `style.css` - Application styles\n' : ''}${this.generatedFiles.js ? '- `script.js` - Application logic with PWA enhancements\n' : ''}${this.generatedFiles.offline ? '- `offline.html` - Offline fallback page\n' : ''}
-### Assets
-- \`icons/\` - App icons in multiple resolutions (72px to 512px)
-  - icon-72x72.png
-  - icon-96x96.png
-  - icon-128x128.png
-  - icon-144x144.png
-  - icon-152x152.png
-  - icon-192x192.png
-  - icon-384x384.png
-  - icon-512x512.png
+- \`sw.js\` - Service Worker (caches ALL ${this.files.allFiles.length} files!)
+- \`icons/\` - 8 app icons (72px to 512px)
+${this.generatedFiles.offline ? '- `offline.html` - Offline fallback page\n' : ''}- \`README.md\` - This file
+
+### Enhanced Files
+- \`index.html\` - Your HTML with PWA code injected
+${this.files.js ? '- `' + this.files.js.path + '` - Your JS enhanced with PWA helpers\n' : ''}
 
 ## ⚙️ Configuration
 
 **App Name:** ${this.config.name}  
 **Short Name:** ${this.config.shortName}  
+**App ID:** ${this.config.appId}  
+**Folder Name:** ${this.config.folderName}  
+**Start URL:** ${this.config.startUrl}  
+**Scope:** ${this.config.scope}  
 **Display Mode:** ${this.config.display}  
+**Orientation:** ${this.config.orientation}  
 **Theme Color:** ${this.config.themeColor}  
 **Background Color:** ${this.config.backgroundColor}  
 **Cache Strategy:** ${this.config.cacheStrategy}  
 **Offline Support:** ${this.config.enableOffline ? 'Enabled' : 'Disabled'}  
-**Push Notifications:** ${this.config.enableNotifications ? 'Enabled' : 'Disabled'}
+**Push Notifications:** ${this.config.enableNotifications ? 'Enabled' : 'Disabled'}  
+**Total Files Cached:** ${this.files.allFiles.length + 3}
 
 ## 🚀 Installation Steps
 
 ### 1. Extract Files
-Extract all files from this ZIP archive to your project directory.
-
-### 2. File Structure
-Maintain the following structure:
-\`\`\`
-your-project/
-├── index.html
-├── manifest.json
-├── sw.js${this.generatedFiles.css ? '\n├── style.css' : ''}${this.generatedFiles.js ? '\n├── script.js' : ''}${this.generatedFiles.offline ? '\n├── offline.html' : ''}
-└── icons/
-    ├── icon-72x72.png
-    ├── icon-96x96.png
-    ├── icon-128x128.png
-    ├── icon-144x144.png
-    ├── icon-152x152.png
-    ├── icon-192x192.png
-    ├── icon-384x384.png
-    └── icon-512x512.png
+\`\`\`bash
+cd /path/to/pwaApps
+unzip ${this.config.folderName}-pwa.zip -d ${this.config.folderName}
 \`\`\`
 
-### 3. Deploy with HTTPS
-**Important:** PWAs require HTTPS to function properly.
-
-#### Option A: Free Hosting Services
-- **Netlify**: Drag & drop deployment at https://www.netlify.com/drop
-- **Vercel**: Git-based deployment at https://vercel.com
-- **GitHub Pages**: Free hosting at https://pages.github.com
-- **Firebase Hosting**: Google's platform at https://firebase.google.com/docs/hosting
-
-#### Option B: Your Own Server
-Ensure your web server is configured with:
-- Valid SSL certificate (Let's Encrypt is free)
-- Proper MIME types for all files
-- Service Worker scope permissions
-
-### 4. Test Your PWA
-
-#### Browser Testing
-1. Open Chrome DevTools (F12)
-2. Navigate to the **Application** tab
-3. Check:
-   - Service Worker is registered and running
-   - Manifest is detected and valid
-   - Cache Storage contains expected files
-
-#### Lighthouse Audit
-1. Open Chrome DevTools
-2. Go to **Lighthouse** tab
-3. Select "Progressive Web App" category
-4. Click "Generate report"
-5. Aim for a score of 90+
-
-### 5. Install on Devices
-
-#### Desktop (Chrome/Edge)
-- Look for install icon in address bar
-- Click to install as desktop app
-
-#### Mobile (Android)
-- Tap browser menu
-- Select "Add to Home Screen"
-- Follow prompts
-
-#### Mobile (iOS)
-- Tap Share button
-- Select "Add to Home Screen"
-- Confirm installation
-
-## 🔧 Customization
-
-### Updating Icons
-Replace files in the \`icons/\` directory with your own icons. Maintain the same sizes and filenames.
-
-### Modifying Cache Strategy
-Edit \`sw.js\` and change the caching logic in the fetch event listener. Current strategy: **${this.config.cacheStrategy}**
-
-### Adding More Files to Cache
-Edit the \`urlsToCache\` array in \`sw.js\`:
-\`\`\`javascript
-const urlsToCache = [
-    '/',
-    '/index.html',
-    '/manifest.json',
-    // Add your files here
-];
+### 2. Verify Structure
+\`\`\`bash
+ls -R ${this.config.folderName}/
+# You should see all ${this.files.allFiles.length} of your original files plus PWA files
 \`\`\`
 
-### Updating Manifest
-Edit \`manifest.json\` to change:
-- App name and description
-- Theme and background colors
-- Display mode and orientation
-- Start URL and scope
+### 3. Start Server (from parent directory)
+\`\`\`bash
+cd /path/to/pwaApps
+python -m http.server 8000
+\`\`\`
 
-## 📱 PWA Features
+### 4. Access Your PWA
+\`\`\`
+http://localhost:8000/${this.config.folderName}/
+\`\`\`
+**Don't forget the trailing slash!**
 
-### ✅ Included Features
-- **Offline Support**: App works without internet connection
-- **Installable**: Can be installed on home screen
-- **Responsive**: Works on all device sizes
-- **Fast Loading**: Cached resources load instantly
-- **App-like Experience**: Runs in standalone window${this.config.enableNotifications ? '\n- **Push Notifications**: Supports web push notifications' : ''}${this.config.enableOffline ? '\n- **Offline Fallback**: Custom offline page' : ''}
+### 5. Install on Device
+- Open the URL in Chrome
+- Click "Install" button or Chrome menu → "Install app"
+- App icon will appear on your home screen
+- All ${this.files.allFiles.length} files work offline!
 
-### 🔜 Optional Enhancements
-- Background sync for offline actions
-- Web push notifications server
-- App shortcuts and share target
-- File handling capabilities
-- Periodic background sync
+## ✅ Testing Checklist
+
+### In Browser Console (F12)
+\`\`\`
+✓ Service Worker registered: http://localhost:8000/${this.config.folderName}/
+✓ App: ${this.config.name}
+✓ Folder: ${this.config.folderName}
+✓ Total files cached: ${this.files.allFiles.length + 3}
+\`\`\`
+
+### Expected Server Logs
+\`\`\`
+GET /${this.config.folderName}/ HTTP/1.1" 200 -
+GET /${this.config.folderName}/manifest.json HTTP/1.1" 200 -
+GET /${this.config.folderName}/sw.js HTTP/1.1" 200 -
+\`\`\`
+All 200 OK - No 404 errors!
+
+### Offline Test
+1. Install the PWA
+2. Open Chrome DevTools → Network tab
+3. Toggle "Offline" checkbox
+4. Reload app
+5. **All ${this.files.allFiles.length} files should load from cache!**
+
+## 📱 For Termux Users (Android)
+
+\`\`\`bash
+# Setup
+cd ~
+mkdir pwaApps
+cd pwaApps
+
+# Extract
+unzip ~/storage/downloads/${this.config.folderName}-pwa.zip -d ${this.config.folderName}
+
+# Verify all files are there
+ls -la ${this.config.folderName}/
+# Should show ${this.files.allFiles.length} files
+
+# Start server from parent directory
+cd ~/pwaApps
+python -m http.server 8000
+
+# Access in Chrome
+# http://localhost:8000/${this.config.folderName}/
+\`\`\`
+
+## 🎯 What's Included
+
+### ✅ ALL Your Files Preserved
+Every single file and folder from your original app is included:
+- HTML, CSS, JavaScript files
+- JSON configuration files
+- Images, audio, video files
+- Assets folders
+- Data files
+- Everything else!
+
+### ✅ PWA Enhancements
+- Service Worker caches ALL ${this.files.allFiles.length} files
+- Works completely offline
+- Install as native app
+- Fast loading from cache
+- Auto-updates when online
+
+### ✅ Multi-App Ready
+Perfect folder structure for hosting multiple PWAs:
+\`\`\`
+pwaApps/
+├── ${this.config.folderName}/    ← This app (${this.files.allFiles.length} files)
+├── anotherapp/                    ← Another app
+└── games/                          ← Yet another app
+\`\`\`
 
 ## 🐛 Troubleshooting
 
-### Service Worker Not Registering
-- Ensure you're serving over HTTPS (or localhost)
-- Check browser console for errors
-- Verify file paths are correct
-- Clear browser cache and hard reload
+### Issue: 404 for service worker or files
+**Solution:** Make sure you:
+1. Started server from **parent directory** (pwaApps)
+2. Access with trailing slash: \`http://localhost:8000/${this.config.folderName}/\`
+3. All ${this.files.allFiles.length} files were extracted correctly
 
-### App Not Installable
-- Run Lighthouse audit to check requirements
-- Verify manifest.json is valid
-- Ensure all required icons exist
-- Check for HTTPS deployment
+### Issue: Files not loading offline
+**Solution:** 
+1. Check service worker is active (Chrome DevTools → Application)
+2. Verify all files are in cache storage
+3. Check console for caching errors
 
-### Icons Not Displaying
-- Verify icon files exist in \`icons/\` directory
-- Check file sizes and formats (PNG required)
-- Clear cache and reload
-- Validate manifest.json icon paths
+### Issue: Some files missing
+**Solution:**
+1. Re-extract the ZIP file
+2. Verify all ${this.files.allFiles.length} files are present
+3. Check folder structure matches original
 
-### Offline Mode Not Working
-- Check Service Worker is active
-- Verify cache strategy in sw.js
-- Ensure cached files exist
-- Test in airplane mode
+## 🌐 Production Deployment
 
-## 📚 Resources
+### Deploy Complete Package
+Upload the entire \`${this.config.folderName}\` folder to:
+- **Netlify:** https://www.netlify.com/drop
+- **Vercel:** https://vercel.com
+- **GitHub Pages:** https://pages.github.com
+- **Firebase:** https://firebase.google.com
 
-- [PWA Documentation](https://web.dev/progressive-web-apps/)
-- [Service Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
-- [Web App Manifest](https://developer.mozilla.org/en-US/docs/Web/Manifest)
-- [Workbox (Advanced Caching)](https://developers.google.com/web/tools/workbox)
+All ${this.files.allFiles.length} files will be deployed together!
 
-## 🤝 Support
+## 📊 Statistics
 
-For issues or questions:
-- Review the troubleshooting section above
-- Check browser console for errors
-- Validate your deployment meets PWA requirements
-- Test with Lighthouse in Chrome DevTools
+- **Original Files:** ${this.files.allFiles.length}
+- **Generated Files:** ${this.generatedFiles.offline ? '4' : '3'} (manifest, SW, icons${this.generatedFiles.offline ? ', offline' : ''})
+- **Total Package Size:** ~${this.formatFileSize(this.files.totalSize + 50000)} (estimated)
+- **Files Cached Offline:** ALL ${this.files.allFiles.length} files
+- **Unique Folders:** ${this.countUniqueFolders()}
+- **Icons Generated:** 8 sizes
 
-## 📄 License
+## 🎉 Features
 
-This PWA was generated using PWA Converter. The generated code is yours to use, modify, and distribute as needed.
+✅ **Complete Folder Preservation** - All files and structure maintained  
+✅ **Full Offline Support** - Every file cached and available offline  
+✅ **Relative Paths** - Works in any subfolder  
+✅ **Multi-App Ready** - Perfect for multiple PWAs  
+✅ **Zero Configuration** - Just extract and run  
+✅ **Production Ready** - Deploy anywhere  
 
 ---
 
 **Generated on:** ${new Date().toLocaleString()}  
-**PWA Converter Version:** 1.0.0  
+**PWA Converter Version:** 2.0.1 (Folder Upload Edition)  
+**Original Folder:** ${this.files.folderName}  
+**Sanitized Name:** ${this.config.folderName}  
+**Files Included:** ${this.files.allFiles.length}  
+**Access URL:** http://localhost:8000/${this.config.folderName}/  
 
-Happy building! 🚀
+Happy deploying! 🚀
+
+All your files are preserved and ready to work offline!
 `;
     }
 
@@ -1555,7 +1874,7 @@ Happy building! 🚀
     formatFileSize(bytes) {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB'];
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
     }
@@ -1594,7 +1913,8 @@ Happy building! 🚀
         const icons = {
             success: '✓',
             error: '✗',
-            info: 'ℹ'
+            info: 'ℹ',
+            warning: '⚠'
         };
         
         toast.textContent = `${icons[type]} ${message}`;
@@ -1617,14 +1937,22 @@ Happy building! 🚀
      */
     reset() {
         // Clear files
-        this.files = { html: null, css: null, js: null, icon: null };
+        this.files = {
+            folderName: null,
+            sanitizedName: null,
+            allFiles: [],
+            totalSize: 0,
+            index: null,
+            css: null,
+            js: null,
+            icon: null
+        };
         this.config = {};
         this.generatedFiles = {};
 
-        // Reset all file inputs
-        document.querySelectorAll('input[type="file"]').forEach(input => {
-            input.value = '';
-        });
+        // Reset folder input
+        document.getElementById('folder-input').value = '';
+        document.getElementById('icon-file').value = '';
 
         // Reset all status messages
         document.querySelectorAll('.file-status').forEach(status => {
@@ -1638,6 +1966,10 @@ Happy building! 🚀
             info.className = 'file-info';
         });
 
+        // Hide folder contents
+        document.getElementById('folder-contents').style.display = 'none';
+        document.getElementById('folder-tree').innerHTML = '';
+
         // Reset form
         document.getElementById('pwa-config-form').reset();
 
@@ -1647,10 +1979,16 @@ Happy building! 🚀
         document.getElementById('background-color').value = '#ffffff';
         document.getElementById('background-color-text').value = '#FFFFFF';
 
-        // Hide download buttons
-        document.getElementById('css-download').style.display = 'none';
-        document.getElementById('js-download').style.display = 'none';
-        document.getElementById('offline-download').style.display = 'none';
+        // Reset orientation
+        document.getElementById('orientation').value = 'portrait-primary';
+
+        // Clear user modification flags
+        ['app-id', 'start-url', 'scope'].forEach(fieldId => {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                delete field.dataset.userModified;
+            }
+        });
 
         // Disable next button
         document.getElementById('next-to-config').disabled = true;
@@ -1676,5 +2014,7 @@ if (document.readyState === 'loading') {
 }
 
 // Log initialization
-console.log('%c🚀 PWA Converter', 'font-size: 20px; font-weight: bold; color: #2196F3;');
-console.log('%cReady to transform your web app into a PWA!', 'font-size: 14px; color: #757575;');
+console.log('%c🚀 PWA Converter v2.0.1', 'font-size: 20px; font-weight: bold; color: #2196F3;');
+console.log('%cFolder Upload Edition - Preserves ALL files!', 'font-size: 14px; color: #4CAF50;');
+console.log('%c✨ Ready to transform your complete app into a PWA!', 'font-size: 12px; color: #757575;');
+console.log('%c✅ Bug Fix: const to let in showDownloadSection()', 'font-size: 11px; color: #FF9800;');
