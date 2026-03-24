@@ -87,10 +87,8 @@ class PWAConverter {
                 const rawPath = file.webkitRelativePath || file.name;
                 let cleanPath = rawPath;
                 try {
-                    // Path might be URL encoded, and might be nested inside other URI parts.
-                    // We take the last part and decode it.
-                    const parts = rawPath.split('/');
-                    cleanPath = decodeURIComponent(parts[parts.length - 1]);
+                    // Path might be URL encoded. We decode the entire path while preserving structure.
+                    cleanPath = rawPath.split('/').map(part => decodeURIComponent(part)).join('/');
                 } catch (e) {
                     console.error("Could not decode path component:", rawPath);
                 }
